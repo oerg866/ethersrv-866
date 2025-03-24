@@ -1,9 +1,19 @@
-History file of ethersrv-linux-866
+History file of ethersrv-866
+
+20250325:
+ - Fixed a bunch of more problems with host<->client file/path name handling
+ - Incorporated FreeBSD port, fixes and additions from Michael Ortmann
 
 20230802:
  - fixed spaces being included in truncated FCB names
  - made longer file names accessible through truncated names
  - file and directory accesses are no longer broken by case sensitivity
+
+20180203m
+ - renamed from ethersrv-linux to ethersrv
+ - ported to musl / Alpine Linux
+ - ported to FreeBSD
+ - enhanced CC and CFLAGS handling
 
 20180203:
  - fixed file truncation when writing to offset 0 (patch by Peter De Wachter),

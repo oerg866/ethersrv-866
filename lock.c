@@ -1,5 +1,5 @@
 /*
- * part of ethersrv-linux
+ * part of ethersrv
  * http://etherdfs.sourceforge.net
  *
  * Copyright (C) 2017 Mateusz Viste

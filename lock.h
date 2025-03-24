@@ -1,5 +1,5 @@
 /*
- * part of ethersrv-linux
+ * part of ethersrv
  *
  * Copyright (C) 2017 Mateusz Viste
  */

@@ -1,13 +1,14 @@
 /*
- * ethersrv-linux is serving files through the EtherDFS protocol. Runs on
- * Linux.
+ * ethersrv is serving files through the EtherDFS protocol. Runs on FreeBSD
+ * and Linux.
  *
  * http://etherdfs.sourceforge.net
  *
- * ethersrv-linux is distributed under the terms of the MIT License, as listed
- * below.
+ * ethersrv is distributed under the terms of the MIT License, as listed below.
  *
  * Copyright (C) 2017, 2018 Mateusz Viste
+ * Copyright (c) 2020 Michael Ortmann
+ * Copyright (c) 2023-2025 E. Voirin (oerg866)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -30,13 +31,23 @@
 
 #include <arpa/inet.h>       /* htons() */
 #include <errno.h>
-#include <endian.h>          /* le16toh(), le32toh() */
-#include <linux/if_ether.h>
-#include <linux/if_packet.h>
+#include <fcntl.h>           /* fcntl(), open() */
+#ifdef __FreeBSD__
+  #include <sys/types.h>     /* u_int32_t */
+  #include <net/bpf.h>       /* BIOCSETIF */
+  #include <net/ethernet.h>  /* ETHER_ADDR_LEN */
+  #include <net/if_dl.h>     /* LLADDR */
+  #include <sys/endian.h>
+  #include <sys/sysctl.h>
+#else
+  #include <endian.h>        /* le16toh(), le32toh() */
+  #include <net/ethernet.h>
+  #include <netpacket/packet.h> /* sockaddr_ll */
+#endif
 #include <limits.h>          /* PATH_MAX and such */
-#include <net/ethernet.h>
 #include <net/if.h>
 #include <signal.h>
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>          /* mempcy() */
 #include <sys/ioctl.h>
@@ -51,7 +62,9 @@
 #include "lock.h"
 
 /* program version */
-#define PVER "20170415"
+#define PVER "20250324"
+
+#define ETHERTYPE_DFS 0xEDF5
 
 /* protocol version (single byte, must be in sync with etherdfs) */
 #define PROTOVER 2
@@ -69,6 +82,7 @@ static struct struct_answcache {
   unsigned short len;  /* frame's length */
 } answcache[ANSWCACHESZ];
 
+#define BUFF_LEN 2048
 
 /* all the calls I support are in the range AL=0..2Eh - the list below serves
  * as a convenience to compare AL (subfunction) values */
@@ -105,7 +119,7 @@ static unsigned char drivesfat[26]; /* 0 if not, non-zero otherwise */
 /* the flag is set when ethersrv is expected to terminate */
 static sig_atomic_t volatile terminationflag = 0;
 
-void sigcatcher(int sig) {
+static void sigcatcher(int sig) {
   switch (sig) {
     case SIGTERM:
     case SIGQUIT:
@@ -156,7 +170,7 @@ static struct struct_answcache *findcacheentry(unsigned char *clientmac) {
 }
 
 
-/* checks wheter dir is belonging to the root directory. returns 0 if so, 1
+/* checks whether dir is belonging to the root directory. returns 0 if so, 1
  * otherwise */
 static int isroot(char *root, char *dir) {
   /* fast-forward to the 'virtual directory' part */
@@ -579,7 +593,7 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
     char fname[DIR_MAX];
     char fnamefcb[12];
     char fullpathname[DIR_MAX];
-    char host_fullpathname[DIR_MAX];
+    char host_fullpathname[DIR_MAX*2+1];
     int offset;
     int fileres;
     unsigned short stackattr, actioncode, spopen_openmode, spopres = 0;
@@ -609,10 +623,11 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
       /* Directory exists, attempt to get host version of the full path name, hoping it exists. */
       if (shorttolong(host_fullpathname, fullpathname, root) == 0) {
         /* if it does, copy its filename to host_fname.*/
+        DBG("Exists, pre:  fname '%s' host_fullpathname '%s'\n", fname, host_fullpathname);
         copy_after_last_slash(fname, host_fullpathname);
+        DBG("Exists, post: fname '%s' host_fullpathname '%s'\n", fname, host_fullpathname);
       } else {
         /* if it doesn't exist, make file name lowercase and then craft the host full path name */
-        lostring(fname, -1);
         sprintf(host_fullpathname, "%s/%s", host_directory, fname);
       }
 
@@ -643,7 +658,7 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
         if (attr == 0xff) { /* file not found - look at high nibble of action code */
           DBG("file doesn't exist -> ");
           if ((actioncode & 0xf0) == 16) { /* create */
-            DBG("create file\n");
+            DBG("create file host_fullpathname='%s' fname='%s'\n", host_fullpathname, fname);
             fileres = createfile(&fprops, host_directory, fname, stackattr & 0xff, drivesfat[reqdrv]);
             if (fileres == 0) spopres = 2; /* spopres == 2 means 'file created' */
           } else { /* fail */
@@ -660,7 +675,7 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
             fileres = 0;
             spopres = 1; /* spopres == 1 means 'file opened' */
           } else if ((actioncode & 0x0f) == 2) { /* truncate */
-            DBG("truncate file\n");
+            DBG("truncate file host_fullpathname='%s' fname='%s'\n", host_fullpathname, fname);
             fileres = createfile(&fprops, host_directory, fname, stackattr & 0xff, drivesfat[reqdrv]);
             if (fileres == 0) spopres = 3; /* spopres == 3 means 'file truncated' */
           } else { /* fail */
@@ -686,7 +701,7 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
       } else { /* success (found a file, created it or truncated it) */
         unsigned short fileid;
         fileid = getitemss(host_fullpathname);
-        DBG("found file: FCB '%s' (id %04X)\n", pfcb(fprops.fcbname), fileid);
+        DBG("found file: '%s' FCB '%s' (id %04X)\n", host_fullpathname, pfcb(fprops.fcbname), fileid);
         DBG("     fsize: %lu\n", fprops.fsize);
         DBG("     fattr: %02Xh\n", fprops.fattr);
         DBG("     ftime: %04lX\n", fprops.ftime);
@@ -741,29 +756,96 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
 }
 
 
-static int raw_sock(const int protocol, const char *const interface, void *const hwaddr) {
+static int raw_sock(const char *const interface, void *const hwaddr) {
   struct ifreq iface;
+  int socketfd, fl;
+#ifdef __FreeBSD__
+  #define PATH_BPF "/dev/bpf"
+  int i = 0;
+  char filename[sizeof PATH_BPF "-9223372036854775808"]; /* 29 */
+  int immediate = 1;
+  static struct bpf_insn bf_insn[] = {
+    /* Make sure this is an ETHERTYPE_DFS packet... */
+    BPF_STMT(BPF_LD + BPF_H + BPF_ABS, 12),
+    BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, ETHERTYPE_DFS, 0, 1),
+    /* If we passed all the tests, ask for the whole packet. */
+    BPF_STMT(BPF_RET+BPF_K, (u_int)-1),
+    /* Otherwise, drop it. */
+    BPF_STMT(BPF_RET+BPF_K, 0),
+  };
+  struct bpf_program bf_program = {
+    sizeof (bf_insn) / (sizeof bf_insn[0]),
+    bf_insn 
+  };
+  int mib[] = {CTL_NET, AF_ROUTE, 0, 0, NET_RT_IFLIST, 0};
+  size_t len;
+  char *buf;
+  struct if_msghdr *ifm;
+  struct sockaddr_dl *sdl;
+#else
   struct sockaddr_ll addr;
-  int socketfd, result;
+  int result;
   int ifindex;
+#endif
 
   if ((interface == NULL) || (*interface == 0)) {
     errno = EINVAL;
     return(-1);
   }
 
-  socketfd = socket(AF_PACKET, SOCK_RAW, htons(protocol));
+#ifdef __FreeBSD__
+  do {
+    snprintf(filename, sizeof(filename), PATH_BPF "%i", i++);
+    socketfd = open(filename, O_RDWR);
+  } while ((socketfd < 0) && (errno == EBUSY));
+#else
+  socketfd = socket(AF_PACKET, SOCK_RAW, htons(ETHERTYPE_DFS));
+#endif
+
   if (socketfd == -1) return(-1);
 
   do {
     memset(&iface, 0, sizeof iface);
-    strncpy((char *)&iface.ifr_name, interface, IFNAMSIZ);
+    strncpy(iface.ifr_name, interface, sizeof iface.ifr_name - 1);
+#ifdef __FreeBSD__
+    if (ioctl(socketfd, BIOCSETIF, &iface) < 0) {
+      DBG("ERROR: could not bind %s to %s: %s\n", filename, iface.ifr_name, strerror(errno));
+      break;
+    }
+    if (ioctl(socketfd, BIOCIMMEDIATE, &immediate) < 0) {
+      DBG("ERROR1: could not enable \"immediate mode\": %s\n", strerror(errno));
+      break;
+    }
+    if (ioctl(socketfd, BIOCSETF, &bf_program) < 0) {
+      DBG("ERROR: could not set the bpf program: %s\n", strerror(errno));
+      break;
+    }
+    if ((mib[5] = if_nametoindex(interface)) == 0) {
+      DBG("ERROR: if_nametoindex(): %s\n", strerror(errno));
+      break;
+    }
+    if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
+      DBG("ERROR: sysctl(): %s\n", strerror(errno));
+      break;
+    }
+    if ((buf = malloc(len)) == NULL) {
+      DBG("ERROR: malloc(): %s\n", strerror(errno));
+      break;
+    }
+    if (sysctl(mib, 6, buf, &len, NULL, 0) < 0) {
+      DBG("ERROR: sysctl(): %s\n", strerror(errno));
+      break;
+    }
+    ifm = (struct if_msghdr *) buf;
+    sdl = (struct sockaddr_dl *) (ifm + 1);
+    memcpy(hwaddr, LLADDR(sdl), ETHER_ADDR_LEN);
+#else
     result = ioctl(socketfd, SIOCGIFINDEX, &iface);
     if (result == -1) break;
     ifindex = iface.ifr_ifindex;
 
     memset(&iface, 0, sizeof(iface));
-    strncpy((char *)&iface.ifr_name, interface, IFNAMSIZ);
+    strncpy(iface.ifr_name, interface, sizeof iface.ifr_name - 1);
     result = ioctl(socketfd, SIOCGIFFLAGS, &iface);
     if (result == -1) break;
     iface.ifr_flags |= IFF_PROMISC;
@@ -771,13 +853,13 @@ static int raw_sock(const int protocol, const char *const interface, void *const
     if (result == -1) break;
 
     memset(&iface, 0, sizeof iface);
-    strncpy((char *)&iface.ifr_name, interface, IFNAMSIZ);
+    strncpy(iface.ifr_name, interface, sizeof iface.ifr_name - 1);
     result = ioctl(socketfd, SIOCGIFHWADDR, &iface);
     if (result == -1) break;
 
     memset(&addr, 0, sizeof addr);
     addr.sll_family = AF_PACKET;
-    addr.sll_protocol = htons(protocol);
+    addr.sll_protocol = htons(ETHERTYPE_DFS);
     addr.sll_ifindex = ifindex;
     addr.sll_hatype = 0;
     addr.sll_pkttype = PACKET_HOST | PACKET_BROADCAST;
@@ -788,6 +870,18 @@ static int raw_sock(const int protocol, const char *const interface, void *const
     if (bind(socketfd, (struct sockaddr *)&addr, sizeof addr)) break;
 
     errno = 0;
+#endif
+    /* unblock socket, better safe than sorry */ 
+    if ((fl = fcntl(socketfd, F_GETFL)) < 0) {
+      DBG("ERROR: fcntl(): %s\n", strerror(errno));
+      break;
+    }
+    fl |= O_NONBLOCK;
+    if ((fl = fcntl(socketfd, F_SETFL, fl)) < 0) {
+      DBG("ERROR: fcntl(): %s\n", strerror(errno));
+      break;
+    }
+
     return(socketfd);
   } while (0);
 
@@ -862,10 +956,11 @@ static unsigned short bsdsum(unsigned char *ptr, unsigned short l) {
 }
 
 static void help(void) {
-  printf("ethersrv-linux version " PVER " | Copyright (C) 2017, 2018 Mateusz Viste\n"
+  printf("EtherDFS Server (ethersrv) version " PVER "\n"
+         "(C) 2017, 2018 Mateusz Viste, 2020 Michael Ortmann, 2023-2025 E. Voirin (oerg866)\n"
          "http://etherdfs.sourceforge.net\n"
          "\n"
-         "usage: ethersrv-linux [options] interface rootpath1 [rootpath2] ... [rootpathN]\n"
+         "usage: ethersrv [options] interface rootpath1 [rootpath2] ... [rootpathN]\n"
          "\n"
          "Options:\n"
          "  -f        Keep in foreground (do not daemonize)\n"
@@ -901,8 +996,8 @@ static char *printmac(unsigned char *b) {
 
 
 int main(int argc, char **argv) {
-  int sock, len, i;
-  unsigned char buff[2048];
+  int sock, len, i, r;
+  unsigned char *buff;
   unsigned char cksumflag;
   unsigned short edf5framelen;
   unsigned char mymac[6];
@@ -910,6 +1005,11 @@ int main(int argc, char **argv) {
   struct struct_answcache *cacheptr;
   int opt;
   int daemon = 1; /* daemonize self by default */
+#ifdef __FreeBSD__
+  int bpf_len;
+  unsigned char *bpf_buf;
+  struct bpf_hdr *bf_hdr;
+#endif
   #define lockfile "/var/run/ethersrv.lock"
 
   while ((opt = getopt(argc, argv, "fh")) != -1) {
@@ -948,11 +1048,11 @@ int main(int argc, char **argv) {
     }
   }
 
-  sock = raw_sock(0xEDF5, intname, mymac);
+  sock = raw_sock(intname, mymac);
   if (sock == -1) {
     fprintf(stderr, "Error: failed to open socket (%s)\n"
                     "\n"
-                    "Usually ethersrv-linux requires to be launched as root to\n"
+                    "Usually ethersrv requires to be launched as root to\n"
                     "be able to handle raw (ethernet) sockets. Are you root?\n", strerror(errno));
     return(1);
   }
@@ -979,23 +1079,61 @@ int main(int argc, char **argv) {
       return(1);
     }
   }
+#ifdef __FreeBSD__
+  if (ioctl(sock, BIOCGBLEN, &bpf_len) < 0) {
+    DBG("ERROR1: could not get the required buffer length for reads on bpf files: %s\n", strerror(errno));
+    return(1);
+  }
+  if ((bpf_buf = malloc(bpf_len)) == NULL) {
+    DBG("ERROR: malloc(): %s\n", strerror(errno));
+    return(1);
+  }
+#else
+  if ((buff = malloc(BUFF_LEN)) == NULL) {
+    DBG("ERROR: malloc(): %s\n", strerror(errno));
+    return(1);
+  }
+#endif
 
   /* main loop */
-  while (terminationflag == 0) {
+  while (1) {
+#if DEBUG > 0
     struct timeval stimeout = {10, 0}; /* set timeout to 10s */
+#endif
     /* prepare the set of descriptors to be monitored later through select() */
     fd_set fdset;
     FD_ZERO(&fdset);
     FD_SET(sock, &fdset);
     /* wait for something to happen on my socket */
-    select(sock + 1, &fdset, NULL, &fdset, &stimeout);
-    len = recv(sock, buff, sizeof(buff), MSG_DONTWAIT);
+#if DEBUG > 0
+    r = select(sock + 1, &fdset, NULL, NULL, &stimeout);
+#else
+    r = select(sock + 1, &fdset, NULL, NULL, NULL);
+#endif
+    if (!r)
+      continue; /* timeout / heartbeat */
+    if (r < 0) {
+      if (terminationflag)
+        break;
+      DBG("ERROR: select(): %s\n", strerror(errno));
+      continue;
+    }
+#ifdef __FreeBSD__
+    if ((len = read(sock, bpf_buf, bpf_len)) < (int) sizeof (struct bpf_hdr)) {
+      DBG("ERROR: read(): %s\n", strerror(errno));
+      continue;
+    }
+    bf_hdr = (struct bpf_hdr *) bpf_buf;
+    buff = bpf_buf + bf_hdr->bh_hdrlen;
+#else
+    len = recv(sock, buff, BUFF_LEN, MSG_DONTWAIT);
+#endif
     if (len < 60) continue; /* restart if less than 60 bytes or negative */
     /* validate this is for me (or broadcast) */
     if ((cmpdata(mymac, buff, 6) != 0) && (cmpdata((unsigned char *)"\xff\xff\xff\xff\xff\xff", buff, 6) != 0)) continue; /* skip anything that is not for me */
-    /* is this EDF5 ?*/
-    if (((unsigned short *)buff)[6] != htons(0xEDF5)) {
-      fprintf(stderr, "Error: Received non-EDF5 frame\n");
+    /* is this ETHERTYPE_DFS? */
+    if (((unsigned short *)buff)[6] != htons(ETHERTYPE_DFS)) {
+      fprintf(stderr, "Error: Received non-ETHERTYPE_DFS frame\n");
       continue;
     }
     /* validate protocol version matches what I expect */
@@ -1014,7 +1152,7 @@ int main(int argc, char **argv) {
     } else if (edf5framelen < 60) { /* obvious error */
       fprintf(stderr, "Error: received a malformed frame from %s\n", printmac(buff + 6));
       continue;
-    } else { /* edf5framelen seems sane, use it instead of the Ethernet lenght */
+    } else { /* edf5framelen seems sane, use it instead of the Ethernet length */
       #if DEBUG > 0
         if (len != edf5framelen) {
           DBG("Note: Received frame with padding from %s (edf5len = %u, ethernet len = %u)\n", printmac(buff + 6), edf5framelen, len);
@@ -1083,12 +1221,21 @@ int main(int argc, char **argv) {
       DBG("Sending back an answer of %d bytes\n", len);
       dumpframe(cacheptr->frame, len);
   #endif
+#ifdef __FreeBSD__
+      i = write(sock, cacheptr->frame, len);
+      if (i < 0) {
+        fprintf(stderr, "ERROR: write() returned %d (%s)\n", i, strerror(errno));
+      } else if (i != len) {
+        fprintf(stderr, "ERROR: write() sent less than expected (%d != %d)\n", i, len);
+      }
+#else
       i = send(sock, cacheptr->frame, len, 0);
       if (i < 0) {
         fprintf(stderr, "ERROR: send() returned %d (%s)\n", i, strerror(errno));
       } else if (i != len) {
         fprintf(stderr, "ERROR: send() sent less than expected (%d != %d)\n", i, len);
       }
+#endif
     } else {
       fprintf(stderr, "Query ignored (result: %d)\n", len);
     }

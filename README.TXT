@@ -1,23 +1,26 @@
 
-            ethersrv-linux Copyright (C) 2017, 2018 Mateusz Viste
-                       http://etherdfs.sourceforge.net
+ethersrv-866
+Copyright (C) 2017-2025 Mateusz Viste, Michael Ortmann, E.Voirin (oerg866)
+ 
+Based on ethersrv-linux, hosted at: http://etherdfs.sourceforge.net
 
+MUSL, FreeBSD port by Michael Ortmann
 Long file name and other modifications by Eric Voirin (oerg866@googlemail.com)
 
-ethersrv-linux is an implementation of EtherSRV for Linux. It allows a Linux
+ethersrv is an implementation of EtherSRV for FreeBSD/Linux. It allows a
 computer to share its drive over Ethernet with multiple DOS clients running
 EtherDFS.
 
 Requirements:
-ethersrv-linux requires a fairly recent Linux operating system to run, and gcc
-to compile.
+ethersrv-866 requires a fairly recent FreeBSD/Linux OS to run, and gcc to
+compile.
 
 How to build:
-just type 'make', then an 'ethersrv-linux' binary should appear (unless things
+just type 'make', then an 'ethersrv' binary should appear (unless things
 go wrong).
 
 How to run:
-ethersrv-linux [options] iface directory [directory2] ... [directoryN]
+ethersrv [options] iface directory [directory2] ... [directoryN]
 
 Note that, in order to be able to operate on ethernet sockets, ethersrv-linux
 needs to have the CAP_NEW_RAW system capability. Usually this means that you
@@ -67,10 +70,11 @@ the wrong file or directory.
 
 ===[ License ]================================================================
 
-ethersrv-linux is distributed under the terms of the MIT License, as listed
-below.
+ethersrv is distributed under the terms of the MIT License, as listed below.
 
 Copyright (C) 2017, 2018 Mateusz Viste
+Copyright (C) 2020, Michael Ortmann
+Copyright (C) 2023-2025 E. Voirin (oerg866)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
