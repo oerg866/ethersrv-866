@@ -31,6 +31,19 @@
 #include "debug.h"
 #include "fs.h" /* include self for control */
 
+/* macOS doesn't have all the FreeBSD file flags, define missing ones */
+#ifdef __APPLE__
+  #ifndef UF_READONLY
+    #define UF_READONLY UF_IMMUTABLE  /* Use immutable flag for readonly */
+  #endif
+  #ifndef UF_SYSTEM
+    #define UF_SYSTEM 0  /* Not supported on macOS */
+  #endif
+  #ifndef UF_ARCHIVE
+    #define UF_ARCHIVE 0  /* Not supported on macOS */
+  #endif
+#endif
+
 /* database containing file/dir identifiers and their names - this is used
  * whenever ethersrv needs to provide etherdfs with a 16bit identifier that
  * etherdfs will subsequently use to refer to this file or dir (typically used
