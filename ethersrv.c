@@ -32,7 +32,7 @@
 #include <arpa/inet.h>       /* htons() */
 #include <errno.h>
 #include <fcntl.h>           /* fcntl(), open() */
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   #include <sys/types.h>     /* u_int32_t */
   #include <net/bpf.h>       /* BIOCSETIF */
   #include <net/ethernet.h>  /* ETHER_ADDR_LEN */
