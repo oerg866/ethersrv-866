@@ -19,7 +19,7 @@
 #include <string.h>
 #include <time.h>        /* time_t, struct tm... */
 #include <unistd.h>
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   #include <sys/mount.h> /* statfs() */
 #else
   #include <linux/msdos_fs.h>
