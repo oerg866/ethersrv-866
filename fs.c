@@ -19,7 +19,7 @@
 #include <string.h>
 #include <time.h>        /* time_t, struct tm... */
 #include <unistd.h>
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   #include <sys/mount.h> /* statfs() */
 #else
   #include <linux/msdos_fs.h>
@@ -30,6 +30,19 @@
 
 #include "debug.h"
 #include "fs.h" /* include self for control */
+
+/* macOS doesn't have all the FreeBSD file flags, define missing ones */
+#ifdef __APPLE__
+  #ifndef UF_READONLY
+    #define UF_READONLY UF_IMMUTABLE  /* Use immutable flag for readonly */
+  #endif
+  #ifndef UF_SYSTEM
+    #define UF_SYSTEM 0  /* Not supported on macOS */
+  #endif
+  #ifndef UF_ARCHIVE
+    #define UF_ARCHIVE 0  /* Not supported on macOS */
+  #endif
+#endif
 
 /* database containing file/dir identifiers and their names - this is used
  * whenever ethersrv needs to provide etherdfs with a 16bit identifier that
@@ -198,7 +211,7 @@ static int matchfile2mask(char *msk, char *fil) {
  * DOS attr flags: 1=RO 2=HID 4=SYS 8=VOL 16=DIR 32=ARCH 64=DEVICE */
 unsigned char getitemattr(char *i, struct fileprops *fprops, unsigned char fatflag) {
   uint32_t attr;
-#ifndef __FreeBSD__
+#if !defined(__FreeBSD__) && !defined(__APPLE__)
   int fd;
 #endif
   struct stat statbuf;
@@ -225,7 +238,7 @@ unsigned char getitemattr(char *i, struct fileprops *fprops, unsigned char fatfl
   if (fprops != NULL) fprops->fsize = statbuf.st_size;
   /* if not a FAT drive, return a fake attribute of 0x20 (archive) */
   if (fatflag == 0) return(0x20);
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   {
     /* map FreeBSD to Linux */
     attr = 0;
@@ -256,7 +269,7 @@ unsigned char getitemattr(char *i, struct fileprops *fprops, unsigned char fatfl
 /* set attributes fattr on file i. returns 0 on success, non-zero otherwise. */
 int setitemattr(char *i, unsigned char fattr) {
   int res;
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   /* map Linux to FreeBSD */
   unsigned long flags = 0;
   if (fattr & 1)  /* ATTR_RO */
@@ -523,7 +536,7 @@ int isfat(char *d) {
     DBG("Error: statfs(): %s\n", strerror(errno)); 
     return(-1);
   }
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   if (strcmp(buf.f_fstypename, "msdosfs"))
 #else
   if (buf.f_type != MSDOS_SUPER_MAGIC)

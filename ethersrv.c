@@ -32,7 +32,7 @@
 #include <arpa/inet.h>       /* htons() */
 #include <errno.h>
 #include <fcntl.h>           /* fcntl(), open() */
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   #include <sys/types.h>     /* u_int32_t */
   #include <net/bpf.h>       /* BIOCSETIF */
   #include <net/ethernet.h>  /* ETHER_ADDR_LEN */
@@ -759,7 +759,7 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
 static int raw_sock(const char *const interface, void *const hwaddr) {
   struct ifreq iface;
   int socketfd, fl;
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   #define PATH_BPF "/dev/bpf"
   int i = 0;
   char filename[sizeof PATH_BPF "-9223372036854775808"]; /* 29 */
@@ -793,7 +793,7 @@ static int raw_sock(const char *const interface, void *const hwaddr) {
     return(-1);
   }
 
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   do {
     snprintf(filename, sizeof(filename), PATH_BPF "%i", i++);
     socketfd = open(filename, O_RDWR);
@@ -807,7 +807,7 @@ static int raw_sock(const char *const interface, void *const hwaddr) {
   do {
     memset(&iface, 0, sizeof iface);
     strncpy(iface.ifr_name, interface, sizeof iface.ifr_name - 1);
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
     if (ioctl(socketfd, BIOCSETIF, &iface) < 0) {
       DBG("ERROR: could not bind %s to %s: %s\n", filename, iface.ifr_name, strerror(errno));
       break;
@@ -1005,7 +1005,7 @@ int main(int argc, char **argv) {
   struct struct_answcache *cacheptr;
   int opt;
   int daemon = 1; /* daemonize self by default */
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   int bpf_len;
   unsigned char *bpf_buf;
   struct bpf_hdr *bf_hdr;
@@ -1079,7 +1079,7 @@ int main(int argc, char **argv) {
       return(1);
     }
   }
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
   if (ioctl(sock, BIOCGBLEN, &bpf_len) < 0) {
     DBG("ERROR1: could not get the required buffer length for reads on bpf files: %s\n", strerror(errno));
     return(1);
@@ -1118,7 +1118,7 @@ int main(int argc, char **argv) {
       DBG("ERROR: select(): %s\n", strerror(errno));
       continue;
     }
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
     if ((len = read(sock, bpf_buf, bpf_len)) < (int) sizeof (struct bpf_hdr)) {
       DBG("ERROR: read(): %s\n", strerror(errno));
       continue;
@@ -1221,7 +1221,7 @@ int main(int argc, char **argv) {
       DBG("Sending back an answer of %d bytes\n", len);
       dumpframe(cacheptr->frame, len);
   #endif
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__APPLE__)
       i = write(sock, cacheptr->frame, len);
       if (i < 0) {
         fprintf(stderr, "ERROR: write() returned %d (%s)\n", i, strerror(errno));
