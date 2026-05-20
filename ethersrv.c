@@ -639,7 +639,7 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
       /* open or create file, depending on exact subfunction */
       if (query == AL_CREATE) {
         DBG("CREATEFIL / stackattr (attribs)=%04Xh / fn='%s'\n", stackattr, fullpathname);
-        fileres = createfile(&fprops, host_directory, fname, stackattr & 0xff, drivesfat[reqdrv]);
+        fileres = createfile(&fprops, host_fullpathname, stackattr & 0xff, drivesfat[reqdrv]);
         resopenmode = 2; /* read/write */
       } else if (query == AL_SPOPNFIL) {
         /* actioncode contains instructions about how to behave...
@@ -659,7 +659,7 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
           DBG("file doesn't exist -> ");
           if ((actioncode & 0xf0) == 16) { /* create */
             DBG("create file host_fullpathname='%s' fname='%s'\n", host_fullpathname, fname);
-            fileres = createfile(&fprops, host_directory, fname, stackattr & 0xff, drivesfat[reqdrv]);
+            fileres = createfile(&fprops, host_fullpathname, stackattr & 0xff, drivesfat[reqdrv]);
             if (fileres == 0) spopres = 2; /* spopres == 2 means 'file created' */
           } else { /* fail */
             DBG("fail\n");
@@ -676,7 +676,7 @@ static int process(struct struct_answcache *answer, unsigned char *reqbuff, int 
             spopres = 1; /* spopres == 1 means 'file opened' */
           } else if ((actioncode & 0x0f) == 2) { /* truncate */
             DBG("truncate file host_fullpathname='%s' fname='%s'\n", host_fullpathname, fname);
-            fileres = createfile(&fprops, host_directory, fname, stackattr & 0xff, drivesfat[reqdrv]);
+            fileres = createfile(&fprops, host_fullpathname, stackattr & 0xff, drivesfat[reqdrv]);
             if (fileres == 0) spopres = 3; /* spopres == 3 means 'file truncated' */
           } else { /* fail */
             DBG("fail\n");

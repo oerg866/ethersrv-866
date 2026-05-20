@@ -376,20 +376,18 @@ int findfile(struct fileprops *f, unsigned short dss, char *fcbtmpl, unsigned ch
 
 
 /* creates or truncates a file f in directory d with attributes attr. returns 0 on success (and f filled), non-zero otherwise. */
-int createfile(struct fileprops *f, char *d, char *fn, unsigned char attr, unsigned char fatflag) {
-  char fullpath[512];
+int createfile(struct fileprops *f, char *hostpath, unsigned char attr, unsigned char fatflag) {
   FILE *fd;
-  sprintf(fullpath, "%s/%s", d, fn);
   /* try to create/truncate the file */
-  fd = fopen(fullpath, "wb");
+  fd = fopen(hostpath, "wb");
   if (fd == NULL) return(-1);
   fclose(fd);
   /* set attribs (only if FAT drive) */
   if (fatflag != 0) {
-    if (setitemattr(fullpath, attr) != 0) fprintf(stderr, "Error: failed to set attribute %02Xh to '%s'\n", attr, fullpath);
+    if (setitemattr(hostpath, attr) != 0) fprintf(stderr, "Error: failed to set attribute %02Xh to '%s'\n", attr, hostpath);
   }
   /* collect and set attributes */
-  getitemattr(fullpath, f, fatflag);
+  getitemattr(hostpath, f, fatflag);
   return(0);
 }
 

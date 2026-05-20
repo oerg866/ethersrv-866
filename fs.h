@@ -50,8 +50,8 @@ int setitemattr(char *i, unsigned char fattr);
 /* searches for file matching template tmpl in directory dss (dss is the starting sector of the directory, as obtained via getitemss) with attribute attr, fills 'out' with the nth match. returns 0 on success, non-zero otherwise. */
 int findfile(struct fileprops *f, unsigned short dss, char *tmpl, unsigned char attr, unsigned short *fpos, int flags);
 
-/* creates or truncates a file f in directory d with attributes attr. returns 0 on success (and f filled), non-zero otherwise. */
-int createfile(struct fileprops *f, char *d, char *fn, unsigned char attr, unsigned char fatflag);
+/* creates or truncates a host file with attributes attr. returns 0 on success (and f filled), non-zero otherwise. */
+int createfile(struct fileprops *f, char *hostpath, unsigned char attr, unsigned char fatflag);
 
 /* returns disks total size, in bytes, or 0 on error. also sets dfree to the
  * amount of available bytes */
