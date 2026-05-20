@@ -1,5 +1,13 @@
 History file of ethersrv-866
 
+20260520:
+- fixed opening existing files for writing (truncating) causing another
+  file with upper case name to be created, the original file ceasing to be
+  accessible from within DOS
+
+20251214:
+ - Incorporated Mac OS support from Petteri valkonen
+
 20250325:
  - Fixed a bunch of more problems with host<->client file/path name handling
  - Incorporated FreeBSD port, fixes and additions from Michael Ortmann
